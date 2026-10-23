@@ -1,0 +1,161 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# REUSABLE WORKFLOW — the single place that knows HOW to run the UI tests.
+#
+# It is never triggered on its own. The three UI suite workflows
+# (ui-smoke.yml, ui-regression.yml, ui-e2e.yml) call it with `uses:` and pass:
+#   suite    → which tag to run (@smoke / @regression / @e2e)
+#   browsers → which Playwright projects to run, as a JSON array
+#
+# The UI framework lives in the `ui-framework/` folder of this repository, so:
+#   - every `run:` step executes inside that folder (see `defaults` below)
+#   - npm caching is keyed on ui-framework/package-lock.json
+#   - artifact paths are prefixed with `ui-framework/`, because upload/download
+#     actions always resolve paths from the repository root, not from
+#     `defaults.run.working-directory`.
+#
+# Flow:
+#   1. `test` job  — one parallel job per browser (matrix). Each job writes a
+#                    "blob" report (raw results).
+#   2. `report` job — waits for all browsers, merges the blobs into ONE HTML
+#                    report + JUnit XML, uploads it, and writes a run summary.
+# ─────────────────────────────────────────────────────────────────────────────
+name: UI Playwright (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      suite:
+        description: 'Tag to run, e.g. @smoke'
+        required: true
+        type: string
+      browsers:
+        description: 'JSON array of Playwright projects, e.g. ["chromium"]'
+        required: false
+        type: string
+        default: '["chromium"]'
+
+# Least-privilege token: these jobs only need to read the repository.
+permissions:
+  contents: read
+
+# Run every shell step from inside the UI framework folder.
+defaults:
+  run:
+    working-directory: ui-framework
+
+jobs:
+  test:
+    name: UI ${{ inputs.suite }} · ${{ matrix.project }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      # Keep the other browsers running even if one fails, so the report shows
+      # the full picture instead of stopping at the first failure.
+      fail-fast: false
+      matrix:
+        project: ${{ fromJSON(inputs.browsers) }}
+
+    env:
+      # Optional overrides — set them under Settings → Secrets and variables →
+      # Actions. When empty, ui-framework/src/config/env.ts uses its defaults.
+      BASE_URL: ${{ vars.BASE_URL }}
+      API_URL: ${{ vars.API_URL }}
+      TEST_PASSWORD: ${{ secrets.TEST_PASSWORD }}
+      # Give each browser's blob a unique name so the merge step can combine them.
+      PLAYWRIGHT_BLOB_OUTPUT_NAME: report-${{ matrix.project }}.zip
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+          cache: npm # caches ~/.npm …
+          cache-dependency-path: ui-framework/package-lock.json # … keyed on this lockfile
+
+      - name: Install dependencies
+        run: npm ci # clean, reproducible install from package-lock.json
+
+      # Downloads the browser binary plus the Linux system libraries it needs.
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps ${{ matrix.project }}
+
+      - name: Run ${{ inputs.suite }} tests on ${{ matrix.project }}
+        run: npx playwright test --grep "${{ inputs.suite }}" --project=${{ matrix.project }}
+
+      # `if: !cancelled()` uploads results even when tests fail — that is
+      # exactly when you need them.
+      - name: Upload blob report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: ui-blob-${{ matrix.project }}
+          path: ui-framework/blob-report
+          retention-days: 1
+
+      - name: Upload failure artifacts (screenshots, videos, traces)
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: ui-test-results-${{ matrix.project }}
+          path: ui-framework/test-results
+          retention-days: 7
+
+  report:
+    name: Merge UI report
+    needs: test
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: ui-framework/package-lock.json
+
+      - run: npm ci
+
+      - name: Download all blob reports
+        uses: actions/download-artifact@v8
+        with:
+          path: ui-framework/all-blob-reports
+          pattern: ui-blob-*
+          merge-multiple: true
+
+      - name: Merge into one HTML + JUnit report
+        env:
+          PLAYWRIGHT_JUNIT_OUTPUT_FILE: test-results/junit.xml
+        run: npx playwright merge-reports --reporter html,junit ./all-blob-reports
+
+      - name: Upload HTML report
+        uses: actions/upload-artifact@v7
+        with:
+          name: ui-playwright-report
+          path: |
+            ui-framework/playwright-report
+            ui-framework/test-results/junit.xml
+          retention-days: 14
+
+      # Writes pass/fail counts to the run's Summary tab, so you can see the
+      # result without downloading anything.
+      - name: Write job summary
+        run: |
+          node -e '
+            const xml = require("fs").readFileSync("test-results/junit.xml", "utf8");
+            const attr = (n) => Number((xml.match(new RegExp(`<testsuites[^>]*\\s${n}="(\\d+)"`)) || [])[1] || 0);
+            const total = attr("tests"), failed = attr("failures") + attr("errors"), skipped = attr("skipped");
+            const lines = [
+              "## UI test results: ${{ inputs.suite }}",
+              "",
+              "| Total | Passed | Failed | Skipped |",
+              "|---|---|---|---|",
+              `| ${total} | ${total - failed - skipped} | ${failed} | ${skipped} |`,
+              "",
+              "Download the **ui-playwright-report** artifact and open `index.html` for full details, traces and screenshots.",
+            ];
+            require("fs").appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join("\n") + "\n");
+          '

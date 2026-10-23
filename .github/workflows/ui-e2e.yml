@@ -1,0 +1,28 @@
+# Daily UI END-TO-END run — complete user journeys (register → logout → login).
+name: UI E2E Tests
+
+on:
+  schedule:
+    # Every day at 06:00 UTC.
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+    inputs:
+      browsers:
+        description: 'Browsers (JSON array)'
+        default: '["chromium","webkit"]'
+        type: string
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    uses: ./.github/workflows/ui-playwright-reusable.yml
+    with:
+      suite: '@e2e'
+      browsers: ${{ inputs.browsers || '["chromium","webkit"]' }}
+    secrets: inherit

@@ -1,0 +1,32 @@
+# Daily UI SMOKE run — fast health check of Registration & Login.
+# Runs first each morning so a broken build is spotted before the longer suites.
+name: UI Smoke Tests
+
+on:
+  schedule:
+    # Cron uses UTC. "0 5 * * *" = every day at 05:00 UTC.
+    - cron: '0 5 * * *'
+  # Adds a "Run workflow" button in the Actions tab for on-demand runs.
+  workflow_dispatch:
+    inputs:
+      browsers:
+        description: 'Browsers (JSON array)'
+        default: '["chromium"]'
+        type: string
+
+# If a new run starts while an old one is still running, cancel the old one.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    uses: ./.github/workflows/ui-playwright-reusable.yml
+    with:
+      suite: '@smoke'
+      # Scheduled runs have no inputs, so fall back to Chromium only.
+      browsers: ${{ inputs.browsers || '["chromium"]' }}
+    secrets: inherit

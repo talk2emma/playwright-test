@@ -1,0 +1,33 @@
+{
+  // TypeScript settings for the framework. We never emit JS ourselves —
+  // Playwright compiles the .ts files on the fly — so this file is used for
+  // type-checking (`npm run typecheck`) and editor IntelliSense only.
+  "compilerOptions": {
+    "target": "ES2022",
+    // "preserve" + "bundler" is the modern setting for code that a tool
+    // (here, Playwright) compiles for us. It replaces the deprecated "node10".
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM"],
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitOverride": true,
+    "types": ["node"],
+    // Path aliases let tests write `@pages/LoginPage` instead of `../../src/pages/LoginPage`.
+    // Paths are relative to this file. Playwright reads these aliases automatically.
+    "paths": {
+      "@pages/*": ["./src/pages/*"],
+      "@fixtures/*": ["./src/fixtures/*"],
+      "@data/*": ["./src/data/*"],
+      "@api/*": ["./src/api/*"],
+      "@config/*": ["./src/config/*"]
+    }
+  },
+  "include": ["src/**/*.ts", "tests/**/*.ts", "playwright.config.ts"]
+}

@@ -1,0 +1,29 @@
+# Daily UI REGRESSION run — the full Registration & Login suite on all three
+# browser engines (Chromium, Firefox, WebKit/Safari).
+name: UI Regression Tests
+
+on:
+  schedule:
+    # Every day at 05:30 UTC (30 minutes after smoke).
+    - cron: '30 5 * * *'
+  workflow_dispatch:
+    inputs:
+      browsers:
+        description: 'Browsers (JSON array)'
+        default: '["chromium","firefox","webkit"]'
+        type: string
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    uses: ./.github/workflows/ui-playwright-reusable.yml
+    with:
+      suite: '@regression'
+      browsers: ${{ inputs.browsers || '["chromium","firefox","webkit"]' }}
+    secrets: inherit

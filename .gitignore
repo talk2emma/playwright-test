@@ -1,0 +1,22 @@
+# Patterns without a leading "/" match in every folder, so they cover both
+# ui-framework/ and api-framework/.
+
+# Dependencies
+node_modules/
+
+# Local environment overrides (may contain secrets)
+.env
+
+# Playwright output
+test-results/
+playwright-report/
+blob-report/
+all-blob-reports/
+playwright/.cache/
+playwright/.auth/
+
+# OS / editor noise
+.DS_Store
+.vscode/*
+!.vscode/extensions.json
+.idea/
